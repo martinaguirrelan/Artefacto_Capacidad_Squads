@@ -17,10 +17,12 @@ var State = {
 function api(fn, args) {
   showLoader(true);
   return new Promise(function (resolve, reject) {
-    google.script.run
+    // Importante: el método debe invocarse con `this` = runner para que
+    // google.script.run conserve los handlers; con .apply(null,...) se pierden.
+    var runner = google.script.run
       .withSuccessHandler(function (r) { showLoader(false); resolve(r); })
-      .withFailureHandler(function (e) { showLoader(false); toast(e.message || 'Error', true); reject(e); })
-      [fn].apply(null, args || []);
+      .withFailureHandler(function (e) { showLoader(false); toast((e && e.message) || 'Error', true); reject(e); });
+    runner[fn].apply(runner, args || []);
   });
 }
 
