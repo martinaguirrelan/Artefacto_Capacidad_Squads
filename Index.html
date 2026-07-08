@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <?!= include('Stylesheet'); ?>
+</head>
+<body>
+  <div id="app">
+    <!-- Cabecera -->
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">◧</span>
+        <div>
+          <div class="brand-title">Capacidad de Squads</div>
+          <div class="brand-sub">Planificación ágil por sprint</div>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <label class="field inline">
+          <span>Squad</span>
+          <select id="squadSelector"></select>
+        </label>
+        <span id="userChip" class="chip" title="Usuario"></span>
+      </div>
+    </header>
+
+    <!-- Pestañas -->
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-tab="dashboard">Dashboard</button>
+      <button class="tab" data-tab="squads">Squads</button>
+      <button class="tab" data-tab="equipo">Equipo &amp; ceremonias</button>
+      <button class="tab" data-tab="sprints">Sprints</button>
+      <button class="tab" data-tab="ausencias">Ausencias</button>
+      <button class="tab" data-tab="ajustes">Ajustes</button>
+    </nav>
+
+    <main class="content">
+
+      <!-- ============ DASHBOARD ============ -->
+      <section class="panel active" id="tab-dashboard">
+        <div class="toolbar">
+          <label class="field inline">
+            <span>Sprint</span>
+            <select id="dashSprint"></select>
+          </label>
+          <span class="spacer"></span>
+          <span id="dashSprintFechas" class="muted"></span>
+        </div>
+
+        <div id="dashCards" class="cards"></div>
+
+        <div class="card block">
+          <div class="card-head">
+            <h3>Capacidad por miembro</h3>
+            <span class="muted small">Horas por sprint · neto vs. reducciones</span>
+          </div>
+          <div id="dashMiembros" class="members"></div>
+        </div>
+
+        <div class="card block">
+          <div class="card-head">
+            <h3>Ausencias del trimestre</h3>
+            <span id="dashTrimLabel" class="muted small"></span>
+          </div>
+          <div id="dashTimeline" class="timeline"></div>
+        </div>
+      </section>
+
+      <!-- ============ SQUADS ============ -->
+      <section class="panel" id="tab-squads">
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head"><h3 id="squadFormTitle">Nuevo squad</h3></div>
+            <form id="squadForm" class="form">
+              <input type="hidden" id="sq_id">
+              <label class="field"><span>Nombre *</span><input id="sq_nombre" required></label>
+              <label class="field"><span>Gerencia / Tribu</span><input id="sq_gerencia"></label>
+              <div class="row">
+                <label class="field"><span>Horas por día</span><input id="sq_horasDia" type="number" step="0.5" min="1" value="8"></label>
+                <label class="field"><span>Días de sprint</span><input id="sq_diasSprint" type="number" min="1" value="10"></label>
+              </div>
+              <label class="field"><span>Descripción</span><textarea id="sq_descripcion" rows="2"></textarea></label>
+              <div class="form-actions">
+                <button type="submit" class="btn primary">Guardar</button>
+                <button type="button" class="btn ghost" id="sq_cancel">Limpiar</button>
+              </div>
+            </form>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Squads registrados</h3></div>
+            <div id="squadList" class="list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ EQUIPO & CEREMONIAS ============ -->
+      <section class="panel" id="tab-equipo">
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head"><h3 id="miembroFormTitle">Nuevo miembro</h3></div>
+            <form id="miembroForm" class="form">
+              <input type="hidden" id="mb_id">
+              <label class="field"><span>Nombre *</span><input id="mb_nombre" required></label>
+              <div class="row">
+                <label class="field"><span>Rol</span><input id="mb_rol" placeholder="Dev, PO, SM…"></label>
+                <label class="field"><span>Email</span><input id="mb_email" type="email"></label>
+              </div>
+              <div class="row">
+                <label class="field"><span>Horas/día (opcional)</span><input id="mb_horasDia" type="number" step="0.5" min="0" placeholder="hereda del squad"></label>
+                <label class="field"><span>Dedicación %</span><input id="mb_factorFocus" type="number" min="0" max="100" value="100"></label>
+              </div>
+              <label class="check"><input type="checkbox" id="mb_activo" checked> Activo</label>
+              <div class="form-actions">
+                <button type="submit" class="btn primary">Guardar</button>
+                <button type="button" class="btn ghost" id="mb_cancel">Limpiar</button>
+              </div>
+            </form>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Miembros del squad</h3></div>
+            <div id="miembroList" class="list"></div>
+          </div>
+        </div>
+
+        <div class="card block">
+          <div class="card-head">
+            <h3>Ceremonias del squad</h3>
+            <span class="muted small">Horas que cada ceremonia consume por sprint (duración × ocurrencias)</span>
+          </div>
+          <form id="ceremoniaForm" class="form inline-form">
+            <input type="hidden" id="ce_id">
+            <label class="field"><span>Ceremonia</span><input id="ce_nombre" placeholder="Daily, Planning…" required></label>
+            <label class="field narrow"><span>Duración (h)</span><input id="ce_duracion" type="number" step="0.25" min="0" required></label>
+            <label class="field narrow"><span>Ocurrencias</span><input id="ce_ocurrencias" type="number" min="0" value="1" required></label>
+            <button type="submit" class="btn primary">Agregar</button>
+          </form>
+          <div id="ceremoniaList" class="list"></div>
+          <div class="ceremonia-total muted" id="ceremoniaTotal"></div>
+        </div>
+      </section>
+
+      <!-- ============ SPRINTS ============ -->
+      <section class="panel" id="tab-sprints">
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head"><h3 id="sprintFormTitle">Nuevo sprint</h3></div>
+            <form id="sprintForm" class="form">
+              <input type="hidden" id="sp_id">
+              <label class="field"><span>Nombre *</span><input id="sp_nombre" placeholder="Sprint 12" required></label>
+              <div class="row">
+                <label class="field"><span>Inicio *</span><input id="sp_inicio" type="date" required></label>
+                <label class="field"><span>Fin *</span><input id="sp_fin" type="date" required></label>
+              </div>
+              <div class="row">
+                <label class="field"><span>Trimestre</span><input id="sp_trimestre" placeholder="2026-Q3"></label>
+                <label class="field"><span>Estado</span>
+                  <select id="sp_estado">
+                    <option value="planificado">Planificado</option>
+                    <option value="activo">Activo</option>
+                    <option value="cerrado">Cerrado</option>
+                  </select>
+                </label>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="btn primary">Guardar</button>
+                <button type="button" class="btn ghost" id="sp_cancel">Limpiar</button>
+              </div>
+            </form>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Sprints del squad</h3></div>
+            <div id="sprintList" class="list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ AUSENCIAS ============ -->
+      <section class="panel" id="tab-ausencias">
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head"><h3 id="ausenciaFormTitle">Registrar ausencia</h3></div>
+            <form id="ausenciaForm" class="form">
+              <input type="hidden" id="au_id">
+              <label class="field"><span>Miembro *</span><select id="au_miembro" required></select></label>
+              <label class="field"><span>Tipo *</span><select id="au_tipo" required></select></label>
+              <div class="row">
+                <label class="field"><span>Inicio *</span><input id="au_inicio" type="date" required></label>
+                <label class="field"><span>Fin</span><input id="au_fin" type="date"></label>
+              </div>
+              <label class="check"><input type="checkbox" id="au_diaCompleto" checked> Día(s) completo(s)</label>
+              <label class="field" id="au_horasWrap" style="display:none"><span>Horas</span><input id="au_horas" type="number" step="0.25" min="0"></label>
+              <label class="field"><span>Descripción</span><input id="au_descripcion"></label>
+              <div class="form-actions">
+                <button type="submit" class="btn primary">Guardar</button>
+                <button type="button" class="btn ghost" id="au_cancel">Limpiar</button>
+              </div>
+            </form>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Ausencias registradas</h3></div>
+            <div id="ausenciaList" class="list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ AJUSTES ============ -->
+      <section class="panel" id="tab-ajustes">
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head">
+              <h3>Feriados</h3>
+              <button type="button" class="btn small ghost" id="btnFeriadosPeru">Cargar Perú (año actual)</button>
+            </div>
+            <form id="feriadoForm" class="form inline-form">
+              <label class="field"><span>Fecha</span><input id="fe_fecha" type="date" required></label>
+              <label class="field"><span>Descripción</span><input id="fe_desc"></label>
+              <button type="submit" class="btn primary">Agregar</button>
+            </form>
+            <div id="feriadoList" class="list"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Usuarios</h3><span class="muted small">admin / editor / viewer</span></div>
+            <form id="usuarioForm" class="form inline-form">
+              <label class="field"><span>Email</span><input id="us_email" type="email" required></label>
+              <label class="field narrow"><span>Rol</span>
+                <select id="us_rol"><option>viewer</option><option>editor</option><option>admin</option></select>
+              </label>
+              <button type="submit" class="btn primary">Agregar</button>
+            </form>
+            <div id="usuarioList" class="list"></div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <div id="toast" class="toast"></div>
+    <div id="loader" class="loader hidden"><div class="spinner"></div></div>
+  </div>
+
+  <?!= include('JavaScript'); ?>
+</body>
+</html>

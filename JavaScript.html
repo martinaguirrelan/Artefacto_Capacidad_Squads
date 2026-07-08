@@ -1,0 +1,550 @@
+<script>
+/* ==========================================================================
+ * Capacidad de Squads — lógica de cliente
+ * ========================================================================== */
+
+var State = {
+  boot: null,
+  squadId: '',
+  sprintId: '',
+  datos: null,          // getDatosSquad del squad actual
+  editing: {}           // ids en edición por entidad
+};
+
+/* ---------- Utilidades ---------- */
+
+/** Envuelve google.script.run en una promesa, con loader. */
+function api(fn, args) {
+  showLoader(true);
+  return new Promise(function (resolve, reject) {
+    google.script.run
+      .withSuccessHandler(function (r) { showLoader(false); resolve(r); })
+      .withFailureHandler(function (e) { showLoader(false); toast(e.message || 'Error', true); reject(e); })
+      [fn].apply(null, args || []);
+  });
+}
+
+function $(sel, ctx) { return (ctx || document).querySelector(sel); }
+function $all(sel, ctx) { return Array.prototype.slice.call((ctx || document).querySelectorAll(sel)); }
+function el(tag, cls, html) { var e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+  return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function fmt(n) { var x = Math.round((Number(n) || 0) * 10) / 10; return (x % 1 === 0) ? String(x) : x.toFixed(1); }
+
+var _toastT;
+function toast(msg, isError) {
+  var t = $('#toast'); t.textContent = msg; t.className = 'toast show' + (isError ? ' error' : '');
+  clearTimeout(_toastT); _toastT = setTimeout(function () { t.className = 'toast'; }, 2800);
+}
+function showLoader(on) { $('#loader').classList.toggle('hidden', !on); }
+function fechaLinda(iso) {
+  if (!iso) return '';
+  var p = String(iso).split('-'); if (p.length < 3) return iso;
+  var meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  return Number(p[2]) + ' ' + meses[Number(p[1]) - 1] + ' ' + p[0];
+}
+
+/* ---------- Arranque ---------- */
+
+document.addEventListener('DOMContentLoaded', function () {
+  bindTabs();
+  bindForms();
+  api('getBootstrap').then(function (boot) {
+    State.boot = boot;
+    $('#userChip').textContent = boot.usuario.email + ' · ' + boot.usuario.rol;
+    fillTiposAusencia();
+    renderSquadSelector();
+    if (boot.squads.length) {
+      State.squadId = boot.squads[0].id;
+      $('#squadSelector').value = State.squadId;
+      loadSquad();
+    } else {
+      renderSquadList(); renderFeriados(); renderUsuarios();
+      toast('Crea tu primer squad para empezar');
+      switchTab('squads');
+    }
+  });
+});
+
+/* ---------- Tabs ---------- */
+
+function bindTabs() {
+  $all('#tabs .tab').forEach(function (b) {
+    b.addEventListener('click', function () { switchTab(b.dataset.tab); });
+  });
+}
+function switchTab(name) {
+  $all('#tabs .tab').forEach(function (b) { b.classList.toggle('active', b.dataset.tab === name); });
+  $all('.panel').forEach(function (p) { p.classList.toggle('active', p.id === 'tab-' + name); });
+}
+
+/* ---------- Squad selector ---------- */
+
+function renderSquadSelector() {
+  var sel = $('#squadSelector');
+  sel.innerHTML = '';
+  State.boot.squads.forEach(function (s) {
+    var o = el('option'); o.value = s.id; o.textContent = s.nombre; sel.appendChild(o);
+  });
+  sel.onchange = function () { State.squadId = sel.value; loadSquad(); };
+}
+
+function loadSquad() {
+  if (!State.squadId) return;
+  return api('getDatosSquad', [State.squadId]).then(function (d) {
+    State.datos = d;
+    // Selecciona un sprint por defecto (activo o el último).
+    var sprints = d.sprints || [];
+    var activo = sprints.filter(function (s) { return s.estado === 'activo'; })[0];
+    State.sprintId = activo ? activo.id : (sprints.length ? sprints[sprints.length - 1].id : '');
+    renderAll();
+  });
+}
+
+function renderAll() {
+  renderSquadList();
+  renderMiembros();
+  renderCeremonias();
+  renderSprints();
+  renderAusencias();
+  renderAusenciaMiembroSelect();
+  renderDashSprintSelector();
+  renderDashboard();
+  renderFeriados();
+  renderUsuarios();
+}
+
+/* ==========================================================================
+ * DASHBOARD
+ * ========================================================================== */
+
+function renderDashSprintSelector() {
+  var sel = $('#dashSprint'); sel.innerHTML = '';
+  var sprints = (State.datos && State.datos.sprints) || [];
+  if (!sprints.length) { sel.appendChild(el('option', null, 'Sin sprints')); return; }
+  sprints.forEach(function (s) {
+    var o = el('option'); o.value = s.id;
+    o.textContent = s.nombre + ' (' + fechaLinda(s.fechaInicio) + ' → ' + fechaLinda(s.fechaFin) + ')';
+    sel.appendChild(o);
+  });
+  sel.value = State.sprintId || sprints[0].id;
+  sel.onchange = function () { State.sprintId = sel.value; renderDashboard(); };
+}
+
+function renderDashboard() {
+  var cards = $('#dashCards'), miembros = $('#dashMiembros');
+  var sprints = (State.datos && State.datos.sprints) || [];
+  if (!State.squadId || !sprints.length || !State.sprintId) {
+    cards.innerHTML = ''; miembros.innerHTML = '<div class="empty">Crea un sprint y algunos miembros para ver la capacidad.</div>';
+    $('#dashSprintFechas').textContent = ''; renderTimeline(null); return;
+  }
+  api('capacidadSprint', [State.squadId, State.sprintId]).then(function (r) {
+    var t = r.totales;
+    $('#dashSprintFechas').textContent =
+      fechaLinda(r.sprint.fechaInicio) + ' → ' + fechaLinda(r.sprint.fechaFin) + ' · ' + r.diasHabiles + ' días hábiles';
+
+    cards.innerHTML = '';
+    cards.appendChild(statCard('Capacidad neta', fmt(t.neto), 'h', true));
+    cards.appendChild(statCard('Disponibilidad', t.disponibilidad, '%'));
+    cards.appendChild(statCard('Capacidad bruta', fmt(t.bruto), 'h'));
+    cards.appendChild(statCard('Ceremonias', '-' + fmt(t.ceremonias), 'h'));
+    cards.appendChild(statCard('Ausencias', '-' + fmt(t.ausencias), 'h'));
+    cards.appendChild(statCard('Miembros', t.miembros, ''));
+
+    // Barras por miembro.
+    miembros.innerHTML = '';
+    if (!r.miembros.length) {
+      miembros.innerHTML = '<div class="empty">Este squad aún no tiene miembros activos.</div>';
+    } else {
+      r.miembros.forEach(function (m) { miembros.appendChild(memberRow(m)); });
+      miembros.appendChild(legend());
+    }
+    // Timeline de ausencias del trimestre del sprint.
+    var trim = r.sprint.trimestre || '';
+    renderTimeline(trim);
+  });
+}
+
+function statCard(label, value, unit, accent) {
+  var c = el('div', 'stat' + (accent ? ' accent' : ''));
+  c.innerHTML = '<div class="label">' + esc(label) + '</div><div class="value">' + esc(value) +
+    (unit ? ' <span class="unit">' + esc(unit) + '</span>' : '') + '</div>';
+  return c;
+}
+
+function memberRow(m) {
+  var row = el('div', 'member-row');
+  var head = el('div', 'member-head');
+  head.innerHTML = '<div class="member-name">' + esc(m.nombre) +
+    (m.rol ? ' <small>' + esc(m.rol) + '</small>' : '') +
+    (m.factorFocus < 100 ? ' <small>· ' + m.factorFocus + '%</small>' : '') + '</div>' +
+    '<div class="member-neto">' + fmt(m.neto) + ' h <small>/ ' + fmt(m.bruto) + ' h · ' + m.disponibilidad + '%</small></div>';
+  row.appendChild(head);
+
+  var bar = el('div', 'bar');
+  var total = m.bruto || 1;
+  var segs = [
+    ['b-neto', m.neto], ['b-ceremonias', m.ceremonias],
+    ['b-vacaciones', m.ausenciasPorTipo.vacaciones], ['b-curso', m.ausenciasPorTipo.curso],
+    ['b-evento', m.ausenciasPorTipo.evento], ['b-chapter', m.ausenciasPorTipo.chapter]
+  ];
+  segs.forEach(function (s) {
+    if (s[1] <= 0) return;
+    var span = el('span', s[0]); span.style.width = (s[1] / total * 100) + '%';
+    span.title = fmt(s[1]) + ' h'; bar.appendChild(span);
+  });
+  row.appendChild(bar);
+  return row;
+}
+
+function legend() {
+  var l = el('div', 'legend');
+  l.innerHTML =
+    '<span><i style="background:var(--neto)"></i>Neto</span>' +
+    '<span><i style="background:var(--ceremonias)"></i>Ceremonias</span>' +
+    '<span><i style="background:var(--vacaciones)"></i>Vacaciones</span>' +
+    '<span><i style="background:var(--curso)"></i>Curso</span>' +
+    '<span><i style="background:var(--evento)"></i>Evento</span>' +
+    '<span><i style="background:var(--chapter)"></i>Chapter</span>';
+  return l;
+}
+
+function renderTimeline(trimestre) {
+  var box = $('#dashTimeline');
+  $('#dashTrimLabel').textContent = trimestre ? ('Trimestre ' + trimestre) : '';
+  if (!State.squadId) { box.innerHTML = ''; return; }
+  api('getAusenciasTrimestre', [State.squadId, trimestre || '']).then(function (items) {
+    box.innerHTML = '';
+    if (!items.length) { box.innerHTML = '<div class="empty">Sin ausencias registradas en este periodo.</div>'; return; }
+    var porMiembro = {};
+    items.forEach(function (a) { (porMiembro[a.miembro] = porMiembro[a.miembro] || []).push(a); });
+    Object.keys(porMiembro).sort().forEach(function (nombre) {
+      var row = el('div', 'tl-row');
+      row.appendChild(el('div', 'tl-name', esc(nombre)));
+      var bars = el('div', 'tl-bars');
+      porMiembro[nombre].forEach(function (a) {
+        var color = 'var(--' + a.tipo + ')';
+        var detalle = a.diaCompleto === 'NO' ? (fmt(a.horas) + ' h') : (a.dias + ' d');
+        var it = el('div', 'tl-item');
+        it.innerHTML = '<span class="tl-dot" style="background:' + color + '"></span>' +
+          '<span class="tag ' + a.tipo + '">' + esc(a.tipoLabel) + '</span> ' +
+          fechaLinda(a.fechaInicio) + (a.fechaFin && a.fechaFin !== a.fechaInicio ? ' → ' + fechaLinda(a.fechaFin) : '') +
+          ' · ' + detalle + (a.descripcion ? ' · ' + esc(a.descripcion) : '');
+        bars.appendChild(it);
+      });
+      row.appendChild(bars);
+      box.appendChild(row);
+    });
+  });
+}
+
+/* ==========================================================================
+ * FORMULARIOS (bind genérico)
+ * ========================================================================== */
+
+function bindForms() {
+  // Squad
+  $('#squadForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    api('saveSquad', [{
+      id: $('#sq_id').value, nombre: $('#sq_nombre').value, gerencia: $('#sq_gerencia').value,
+      horasDia: $('#sq_horasDia').value, diasSprint: $('#sq_diasSprint').value, descripcion: $('#sq_descripcion').value
+    }]).then(function (s) {
+      toast('Squad guardado'); resetSquadForm();
+      return api('getBootstrap');
+    }).then(function (boot) {
+      State.boot = boot; renderSquadSelector();
+      if (!State.squadId && boot.squads.length) State.squadId = boot.squads[0].id;
+      $('#squadSelector').value = State.squadId; loadSquad();
+    });
+  });
+  $('#sq_cancel').addEventListener('click', resetSquadForm);
+
+  // Miembro
+  $('#miembroForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (!State.squadId) { toast('Selecciona un squad primero', true); return; }
+    api('saveMiembro', [{
+      id: $('#mb_id').value, squadId: State.squadId, nombre: $('#mb_nombre').value, rol: $('#mb_rol').value,
+      email: $('#mb_email').value, horasDia: $('#mb_horasDia').value, factorFocus: $('#mb_factorFocus').value,
+      activo: $('#mb_activo').checked
+    }]).then(function () { toast('Miembro guardado'); resetMiembroForm(); loadSquad(); });
+  });
+  $('#mb_cancel').addEventListener('click', resetMiembroForm);
+
+  // Ceremonia
+  $('#ceremoniaForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (!State.squadId) { toast('Selecciona un squad primero', true); return; }
+    api('saveCeremonia', [{
+      id: $('#ce_id').value, squadId: State.squadId, nombre: $('#ce_nombre').value,
+      duracionHoras: $('#ce_duracion').value, ocurrencias: $('#ce_ocurrencias').value
+    }]).then(function () { toast('Ceremonia guardada'); resetCeremoniaForm(); loadSquad(); });
+  });
+
+  // Sprint
+  $('#sprintForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (!State.squadId) { toast('Selecciona un squad primero', true); return; }
+    api('saveSprint', [{
+      id: $('#sp_id').value, squadId: State.squadId, nombre: $('#sp_nombre').value,
+      fechaInicio: $('#sp_inicio').value, fechaFin: $('#sp_fin').value,
+      trimestre: $('#sp_trimestre').value, estado: $('#sp_estado').value
+    }]).then(function () { toast('Sprint guardado'); resetSprintForm(); loadSquad(); });
+  });
+  $('#sp_cancel').addEventListener('click', resetSprintForm);
+
+  // Ausencia
+  $('#au_diaCompleto').addEventListener('change', function () {
+    $('#au_horasWrap').style.display = this.checked ? 'none' : 'flex';
+  });
+  $('#ausenciaForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    api('saveAusencia', [{
+      id: $('#au_id').value, miembroId: $('#au_miembro').value, tipo: $('#au_tipo').value,
+      fechaInicio: $('#au_inicio').value, fechaFin: $('#au_fin').value,
+      diaCompleto: $('#au_diaCompleto').checked ? 'SI' : 'NO', horas: $('#au_horas').value,
+      descripcion: $('#au_descripcion').value
+    }]).then(function () { toast('Ausencia guardada'); resetAusenciaForm(); loadSquad(); });
+  });
+  $('#au_cancel').addEventListener('click', resetAusenciaForm);
+
+  // Feriado
+  $('#feriadoForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    api('saveFeriado', [{ fecha: $('#fe_fecha').value, descripcion: $('#fe_desc').value }])
+      .then(function () { toast('Feriado agregado'); $('#feriadoForm').reset(); renderFeriados(); renderDashboard(); });
+  });
+  $('#btnFeriadosPeru').addEventListener('click', function () {
+    api('sembrarFeriadosPeru').then(function (r) {
+      toast('Feriados Perú ' + r.anio + ': +' + r.agregados); renderFeriados(); renderDashboard();
+    });
+  });
+
+  // Usuario
+  $('#usuarioForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    api('saveUsuario', [{ email: $('#us_email').value, rol: $('#us_rol').value }])
+      .then(function () { toast('Usuario guardado'); $('#usuarioForm').reset(); renderUsuarios(); });
+  });
+}
+
+/* ==========================================================================
+ * SQUADS
+ * ========================================================================== */
+
+function renderSquadList() {
+  var box = $('#squadList'); box.innerHTML = '';
+  var squads = (State.boot && State.boot.squads) || [];
+  if (!squads.length) { box.innerHTML = '<div class="empty">Aún no hay squads.</div>'; return; }
+  squads.forEach(function (s) {
+    var item = el('div', 'list-item');
+    item.innerHTML =
+      '<div class="li-main"><span class="li-title">' + esc(s.nombre) + '</span>' +
+      '<span class="li-sub">' + esc(s.gerencia || 'Sin gerencia') + ' · ' + fmt(s.horasDia) + ' h/día · ' +
+      s.diasSprint + ' días</span></div>';
+    var actions = el('div', 'li-actions');
+    actions.appendChild(btn('Editar', function () { editSquad(s); }));
+    actions.appendChild(btn('Eliminar', function () { confirmDel('Eliminar el squad "' + s.nombre + '" y todos sus datos?', function () {
+      api('deleteSquad', [s.id]).then(function () { toast('Squad eliminado'); if (State.squadId === s.id) State.squadId = '';
+        return api('getBootstrap'); }).then(function (boot) { State.boot = boot; renderSquadSelector();
+        State.squadId = boot.squads.length ? boot.squads[0].id : ''; if (State.squadId) { $('#squadSelector').value = State.squadId; loadSquad(); } else renderAll(); });
+    }); }, 'del'));
+    item.appendChild(actions);
+    box.appendChild(item);
+  });
+}
+function editSquad(s) {
+  $('#sq_id').value = s.id; $('#sq_nombre').value = s.nombre; $('#sq_gerencia').value = s.gerencia || '';
+  $('#sq_horasDia').value = s.horasDia; $('#sq_diasSprint').value = s.diasSprint; $('#sq_descripcion').value = s.descripcion || '';
+  $('#squadFormTitle').textContent = 'Editar squad'; switchTab('squads');
+}
+function resetSquadForm() { $('#squadForm').reset(); $('#sq_id').value = ''; $('#sq_horasDia').value = 8; $('#sq_diasSprint').value = 10; $('#squadFormTitle').textContent = 'Nuevo squad'; }
+
+/* ==========================================================================
+ * MIEMBROS
+ * ========================================================================== */
+
+function renderMiembros() {
+  var box = $('#miembroList'); box.innerHTML = '';
+  var items = (State.datos && State.datos.miembros) || [];
+  if (!items.length) { box.innerHTML = '<div class="empty">Sin miembros en este squad.</div>'; return; }
+  items.forEach(function (m) {
+    var item = el('div', 'list-item');
+    var focus = (m.factorFocus === '' || m.factorFocus == null) ? 100 : m.factorFocus;
+    item.innerHTML =
+      '<div class="li-main"><span class="li-title">' + esc(m.nombre) +
+      (String(m.activo) === 'NO' ? ' <span class="tag off">inactivo</span>' : '') + '</span>' +
+      '<span class="li-sub">' + esc(m.rol || '—') + ' · ' + (m.horasDia ? fmt(m.horasDia) + ' h/día' : 'h/día del squad') +
+      ' · ' + focus + '% dedicación</span></div>';
+    var actions = el('div', 'li-actions');
+    actions.appendChild(btn('Editar', function () { editMiembro(m); }));
+    actions.appendChild(btn('Eliminar', function () { confirmDel('Eliminar a "' + m.nombre + '" y sus ausencias?', function () {
+      api('deleteMiembro', [m.id]).then(function () { toast('Miembro eliminado'); loadSquad(); }); }); }, 'del'));
+    item.appendChild(actions);
+    box.appendChild(item);
+  });
+}
+function editMiembro(m) {
+  $('#mb_id').value = m.id; $('#mb_nombre').value = m.nombre; $('#mb_rol').value = m.rol || '';
+  $('#mb_email').value = m.email || ''; $('#mb_horasDia').value = m.horasDia || '';
+  $('#mb_factorFocus').value = (m.factorFocus === '' || m.factorFocus == null) ? 100 : m.factorFocus;
+  $('#mb_activo').checked = String(m.activo) !== 'NO';
+  $('#miembroFormTitle').textContent = 'Editar miembro'; switchTab('equipo');
+}
+function resetMiembroForm() { $('#miembroForm').reset(); $('#mb_id').value = ''; $('#mb_factorFocus').value = 100; $('#mb_activo').checked = true; $('#miembroFormTitle').textContent = 'Nuevo miembro'; }
+
+/* ==========================================================================
+ * CEREMONIAS
+ * ========================================================================== */
+
+function renderCeremonias() {
+  var box = $('#ceremoniaList'); box.innerHTML = '';
+  var items = (State.datos && State.datos.ceremonias) || [];
+  if (!items.length) { box.innerHTML = '<div class="empty">Sin ceremonias. Se recomienda: Daily, Planning, Refinement, Review, Retro.</div>'; $('#ceremoniaTotal').textContent = ''; return; }
+  var total = 0;
+  items.forEach(function (c) {
+    var h = (Number(c.duracionHoras) || 0) * (Number(c.ocurrencias) || 0);
+    if (String(c.activo) !== 'NO') total += h;
+    var item = el('div', 'list-item');
+    item.innerHTML =
+      '<div class="li-main"><span class="li-title">' + esc(c.nombre) + '</span>' +
+      '<span class="li-sub">' + fmt(c.duracionHoras) + ' h × ' + c.ocurrencias + ' = ' + fmt(h) + ' h / sprint</span></div>';
+    var actions = el('div', 'li-actions');
+    actions.appendChild(btn('Editar', function () { editCeremonia(c); }));
+    actions.appendChild(btn('Eliminar', function () {
+      api('deleteCeremonia', [c.id]).then(function () { toast('Ceremonia eliminada'); loadSquad(); }); }, 'del'));
+    item.appendChild(actions);
+    box.appendChild(item);
+  });
+  $('#ceremoniaTotal').textContent = 'Total ceremonias por miembro: ' + fmt(total) + ' h / sprint';
+}
+function editCeremonia(c) {
+  $('#ce_id').value = c.id; $('#ce_nombre').value = c.nombre; $('#ce_duracion').value = c.duracionHoras; $('#ce_ocurrencias').value = c.ocurrencias;
+}
+function resetCeremoniaForm() { $('#ceremoniaForm').reset(); $('#ce_id').value = ''; $('#ce_ocurrencias').value = 1; }
+
+/* ==========================================================================
+ * SPRINTS
+ * ========================================================================== */
+
+function renderSprints() {
+  var box = $('#sprintList'); box.innerHTML = '';
+  var items = (State.datos && State.datos.sprints) || [];
+  if (!items.length) { box.innerHTML = '<div class="empty">Sin sprints en este squad.</div>'; return; }
+  items.forEach(function (s) {
+    var item = el('div', 'list-item');
+    item.innerHTML =
+      '<div class="li-main"><span class="li-title">' + esc(s.nombre) +
+      ' <span class="tag off">' + esc(s.estado) + '</span></span>' +
+      '<span class="li-sub">' + fechaLinda(s.fechaInicio) + ' → ' + fechaLinda(s.fechaFin) +
+      (s.trimestre ? ' · ' + esc(s.trimestre) : '') + '</span></div>';
+    var actions = el('div', 'li-actions');
+    actions.appendChild(btn('Editar', function () { editSprint(s); }));
+    actions.appendChild(btn('Eliminar', function () {
+      api('deleteSprint', [s.id]).then(function () { toast('Sprint eliminado'); loadSquad(); }); }, 'del'));
+    item.appendChild(actions);
+    box.appendChild(item);
+  });
+}
+function editSprint(s) {
+  $('#sp_id').value = s.id; $('#sp_nombre').value = s.nombre; $('#sp_inicio').value = s.fechaInicio;
+  $('#sp_fin').value = s.fechaFin; $('#sp_trimestre').value = s.trimestre || ''; $('#sp_estado').value = s.estado || 'planificado';
+  $('#sprintFormTitle').textContent = 'Editar sprint'; switchTab('sprints');
+}
+function resetSprintForm() { $('#sprintForm').reset(); $('#sp_id').value = ''; $('#sprintFormTitle').textContent = 'Nuevo sprint'; }
+
+/* ==========================================================================
+ * AUSENCIAS
+ * ========================================================================== */
+
+function fillTiposAusencia() {
+  var sel = $('#au_tipo'); sel.innerHTML = '';
+  (State.boot.tiposAusencia || []).forEach(function (t) {
+    var o = el('option'); o.value = t.id; o.textContent = t.nombre; sel.appendChild(o);
+  });
+}
+function renderAusenciaMiembroSelect() {
+  var sel = $('#au_miembro'); sel.innerHTML = '';
+  var items = (State.datos && State.datos.miembros) || [];
+  items.forEach(function (m) { var o = el('option'); o.value = m.id; o.textContent = m.nombre; sel.appendChild(o); });
+}
+function renderAusencias() {
+  var box = $('#ausenciaList'); box.innerHTML = '';
+  var items = (State.datos && State.datos.ausencias) || [];
+  var nombreDe = {}; ((State.datos && State.datos.miembros) || []).forEach(function (m) { nombreDe[String(m.id)] = m.nombre; });
+  if (!items.length) { box.innerHTML = '<div class="empty">Sin ausencias registradas.</div>'; return; }
+  var tipos = {}; (State.boot.tiposAusencia || []).forEach(function (t) { tipos[t.id] = t.nombre; });
+  items.forEach(function (a) {
+    var detalle = String(a.diaCompleto) === 'NO' ? (fmt(a.horas) + ' h') : 'día(s) completo(s)';
+    var item = el('div', 'list-item');
+    item.innerHTML =
+      '<div class="li-main"><span class="li-title">' + esc(nombreDe[String(a.miembroId)] || '(sin miembro)') +
+      ' <span class="tag ' + esc(a.tipo) + '">' + esc(tipos[a.tipo] || a.tipo) + '</span></span>' +
+      '<span class="li-sub">' + fechaLinda(a.fechaInicio) +
+      (a.fechaFin && a.fechaFin !== a.fechaInicio ? ' → ' + fechaLinda(a.fechaFin) : '') + ' · ' + detalle +
+      (a.descripcion ? ' · ' + esc(a.descripcion) : '') + '</span></div>';
+    var actions = el('div', 'li-actions');
+    actions.appendChild(btn('Editar', function () { editAusencia(a); }));
+    actions.appendChild(btn('Eliminar', function () {
+      api('deleteAusencia', [a.id]).then(function () { toast('Ausencia eliminada'); loadSquad(); }); }, 'del'));
+    item.appendChild(actions);
+    box.appendChild(item);
+  });
+}
+function editAusencia(a) {
+  $('#au_id').value = a.id; $('#au_miembro').value = a.miembroId; $('#au_tipo').value = a.tipo;
+  $('#au_inicio').value = a.fechaInicio; $('#au_fin').value = a.fechaFin || '';
+  var completo = String(a.diaCompleto) !== 'NO';
+  $('#au_diaCompleto').checked = completo; $('#au_horasWrap').style.display = completo ? 'none' : 'flex';
+  $('#au_horas').value = a.horas || ''; $('#au_descripcion').value = a.descripcion || '';
+  $('#ausenciaFormTitle').textContent = 'Editar ausencia'; switchTab('ausencias');
+}
+function resetAusenciaForm() { $('#ausenciaForm').reset(); $('#au_id').value = ''; $('#au_diaCompleto').checked = true; $('#au_horasWrap').style.display = 'none'; $('#ausenciaFormTitle').textContent = 'Registrar ausencia'; }
+
+/* ==========================================================================
+ * FERIADOS & USUARIOS
+ * ========================================================================== */
+
+function renderFeriados() {
+  var box = $('#feriadoList'); box.innerHTML = '';
+  var items = (State.boot && State.boot.feriados) || [];
+  if (!items.length) { box.innerHTML = '<div class="empty">Sin feriados. Puedes cargar los de Perú.</div>'; return; }
+  items.forEach(function (f) {
+    var item = el('div', 'list-item');
+    item.innerHTML = '<div class="li-main"><span class="li-title">' + fechaLinda(f.fecha) + '</span>' +
+      '<span class="li-sub">' + esc(f.descripcion || '') + '</span></div>';
+    var actions = el('div', 'li-actions');
+    actions.appendChild(btn('Eliminar', function () {
+      api('deleteFeriado', [f.id]).then(function () { toast('Feriado eliminado'); return api('getBootstrap'); })
+        .then(function (boot) { State.boot.feriados = boot.feriados; renderFeriados(); renderDashboard(); }); }, 'del'));
+    item.appendChild(actions);
+    box.appendChild(item);
+  });
+}
+
+function renderUsuarios() {
+  var box = $('#usuarioList'); box.innerHTML = '';
+  api('listUsuarios').then(function (items) {
+    box.innerHTML = '';
+    if (!items.length) { box.innerHTML = '<div class="empty">Sin usuarios registrados (todos entran como admin).</div>'; return; }
+    items.forEach(function (u) {
+      var item = el('div', 'list-item');
+      item.innerHTML = '<div class="li-main"><span class="li-title">' + esc(u.email) + '</span>' +
+        '<span class="li-sub">' + esc(u.rol) + '</span></div>';
+      var actions = el('div', 'li-actions');
+      actions.appendChild(btn('Eliminar', function () {
+        api('deleteUsuario', [u.email]).then(function () { toast('Usuario eliminado'); renderUsuarios(); }); }, 'del'));
+      item.appendChild(actions);
+      box.appendChild(item);
+    });
+  });
+}
+
+/* ---------- Helpers UI ---------- */
+
+function btn(label, onClick, extraCls) {
+  var b = el('button', extraCls || ''); b.textContent = label; b.onclick = onClick; return b;
+}
+function confirmDel(msg, onOk) { if (window.confirm(msg)) onOk(); }
+</script>

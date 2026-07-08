@@ -1,0 +1,11 @@
+# clasp / Apps Script
+.clasp.json
+.clasprc.json
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Node (por si se usan herramientas locales)
+node_modules/
+npm-debug.log*

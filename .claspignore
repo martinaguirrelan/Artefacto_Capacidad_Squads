@@ -1,0 +1,18 @@
+# Todo lo que clasp NO debe subir a Apps Script.
+**/**
+!appsscript.json
+!Code.gs
+!Database.gs
+!Fechas.gs
+!Squads.gs
+!Miembros.gs
+!Ceremonias.gs
+!Sprints.gs
+!Ausencias.gs
+!Feriados.gs
+!Capacidad.gs
+!Usuarios.gs
+!Seed.gs
+!Index.html
+!Stylesheet.html
+!JavaScript.html

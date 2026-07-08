@@ -1,0 +1,17 @@
+{
+  "name": "capacidad-squads-agile",
+  "version": "1.0.0",
+  "description": "App Apps Script para planificar la capacidad de Squads Ágiles por sprint",
+  "private": true,
+  "scripts": {
+    "login": "clasp login",
+    "create": "clasp create --type sheets --title \"Capacidad Squads Agile\" --rootDir .",
+    "push": "clasp push",
+    "pull": "clasp pull",
+    "deploy": "clasp deploy --description \"Capacidad Squads Agile web app\"",
+    "open": "clasp open"
+  },
+  "devDependencies": {
+    "@google/clasp": "^2.4.2"
+  }
+}
