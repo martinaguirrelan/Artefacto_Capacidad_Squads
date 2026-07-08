@@ -116,8 +116,21 @@ function readAll_(def) {
 
 function rowToObject_(headers, row) {
   const obj = {};
-  headers.forEach(function (h, i) { obj[h] = row[i]; });
+  headers.forEach(function (h, i) { obj[h] = normalizarCelda_(row[i]); });
   return obj;
+}
+
+/**
+ * Normaliza el valor de una celda a un tipo serializable por google.script.run.
+ * En particular convierte Date -> 'yyyy-MM-dd' (todas nuestras fechas son de
+ * día completo). Los objetos Date sin convertir pueden hacer que el objeto
+ * devuelto llegue como null al cliente.
+ */
+function normalizarCelda_(v) {
+  if (Object.prototype.toString.call(v) === '[object Date]') {
+    return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+  return v;
 }
 
 function objectToRow_(headers, obj) {
