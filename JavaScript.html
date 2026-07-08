@@ -52,8 +52,9 @@ document.addEventListener('DOMContentLoaded', function () {
   bindTabs();
   bindForms();
   api('getBootstrap').then(function (boot) {
+    if (!boot || !boot.usuario) throw new Error('getBootstrap devolvió un valor vacío o sin usuario.');
     State.boot = boot;
-    $('#userChip').textContent = boot.usuario.email + ' · ' + boot.usuario.rol;
+    $('#userChip').textContent = (boot.usuario.email || '(sin email)') + ' · ' + (boot.usuario.rol || '');
     fillTiposAusencia();
     renderSquadSelector();
     if (boot.squads.length) {
@@ -65,8 +66,23 @@ document.addEventListener('DOMContentLoaded', function () {
       toast('Crea tu primer squad para empezar');
       switchTab('squads');
     }
+  }).catch(function (e) {
+    mostrarErrorCarga(e);
   });
 });
+
+/** Muestra un cartel rojo persistente con el error de carga (diagnóstico). */
+function mostrarErrorCarga(e) {
+  var msg = (e && (e.message || e.toString())) || 'Error desconocido';
+  var chip = $('#userChip'); if (chip) chip.textContent = '⚠ error';
+  var prev = document.getElementById('errBanner'); if (prev) prev.remove();
+  var b = document.createElement('div');
+  b.id = 'errBanner';
+  b.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#dc2626;color:#fff;' +
+    'padding:12px 18px;z-index:100;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.2)';
+  b.textContent = 'Error al cargar: ' + msg;
+  document.body.appendChild(b);
+}
 
 /* ---------- Tabs ---------- */
 
