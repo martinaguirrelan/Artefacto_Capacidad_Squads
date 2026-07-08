@@ -41,9 +41,31 @@ const SHEETS = {
   }
 };
 
-/** Devuelve el Spreadsheet activo (contenedor del script). */
+/**
+ * ID del Spreadsheet contenedor. Se usa como respaldo cuando la app corre como
+ * Web App (doGet): en ese contexto no hay "hoja activa" y
+ * SpreadsheetApp.getActiveSpreadsheet() devuelve null.
+ * Si despliegas sobre otra hoja, ejecuta guardarSpreadsheetId() una vez desde
+ * el menú/editor (con la hoja abierta) o reemplaza este valor por tu ID.
+ */
+const SPREADSHEET_ID_FALLBACK = '12r3unuNPo-YaLnU0yJynWsj1APS_XJ9Rw8crRBNglGI';
+
+/** Devuelve el Spreadsheet contenedor (activo o, si no, abierto por ID). */
 function getSpreadsheet_() {
-  return SpreadsheetApp.getActiveSpreadsheet();
+  const activo = SpreadsheetApp.getActiveSpreadsheet();
+  if (activo) return activo;
+  const propId = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+  const id = propId || SPREADSHEET_ID_FALLBACK;
+  if (!id) throw new Error('No se pudo determinar el Spreadsheet contenedor.');
+  return SpreadsheetApp.openById(id);
+}
+
+/** Guarda el ID de la hoja activa en Script Properties (ejecutar con la hoja abierta). */
+function guardarSpreadsheetId() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) throw new Error('Ejecútalo desde la hoja (Extensiones → Apps Script) con la hoja abierta.');
+  PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID', ss.getId());
+  return ss.getId();
 }
 
 /**
