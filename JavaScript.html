@@ -296,7 +296,8 @@ function bindForms() {
     if (!State.squadId) { toast('Selecciona un squad primero', true); return; }
     api('saveCeremonia', [{
       id: $('#ce_id').value, squadId: State.squadId, nombre: $('#ce_nombre').value,
-      duracionHoras: $('#ce_duracion').value, ocurrencias: $('#ce_ocurrencias').value
+      duracionHoras: (Number($('#ce_horas').value) || 0) + (Number($('#ce_min').value) || 0) / 60,
+      ocurrencias: $('#ce_ocurrencias').value
     }]).then(function () { toast('Ceremonia guardada'); resetCeremoniaForm(); loadSquad(); });
   });
 
@@ -427,7 +428,7 @@ function renderCeremonias() {
     var item = el('div', 'list-item');
     item.innerHTML =
       '<div class="li-main"><span class="li-title">' + esc(c.nombre) + '</span>' +
-      '<span class="li-sub">' + fmt(c.duracionHoras) + ' h × ' + c.ocurrencias + ' = ' + fmt(h) + ' h / sprint</span></div>';
+      '<span class="li-sub">' + hm(c.duracionHoras) + ' × ' + c.ocurrencias + ' = ' + hm(h) + ' / sprint</span></div>';
     var actions = el('div', 'li-actions');
     actions.appendChild(btn('Editar', function () { editCeremonia(c); }));
     actions.appendChild(btn('Eliminar', function () {
@@ -435,12 +436,27 @@ function renderCeremonias() {
     item.appendChild(actions);
     box.appendChild(item);
   });
-  $('#ceremoniaTotal').textContent = 'Total ceremonias por miembro: ' + fmt(total) + ' h / sprint';
+  $('#ceremoniaTotal').textContent = 'Total ceremonias por miembro: ' + hm(total) + ' / sprint';
+}
+/** Formatea horas decimales como "1h 30m" / "45m" / "2h". */
+function hm(horasDec) {
+  var totalMin = Math.round((Number(horasDec) || 0) * 60);
+  var h = Math.floor(totalMin / 60), m = totalMin % 60;
+  if (h && m) return h + 'h ' + m + 'm';
+  if (h) return h + 'h';
+  return m + 'm';
 }
 function editCeremonia(c) {
-  $('#ce_id').value = c.id; $('#ce_nombre').value = c.nombre; $('#ce_duracion').value = c.duracionHoras; $('#ce_ocurrencias').value = c.ocurrencias;
+  var totalMin = Math.round((Number(c.duracionHoras) || 0) * 60);
+  $('#ce_id').value = c.id; $('#ce_nombre').value = c.nombre;
+  $('#ce_horas').value = Math.floor(totalMin / 60);
+  $('#ce_min').value = totalMin % 60;
+  $('#ce_ocurrencias').value = c.ocurrencias;
 }
-function resetCeremoniaForm() { $('#ceremoniaForm').reset(); $('#ce_id').value = ''; $('#ce_ocurrencias').value = 1; }
+function resetCeremoniaForm() {
+  $('#ceremoniaForm').reset(); $('#ce_id').value = '';
+  $('#ce_horas').value = 0; $('#ce_min').value = 0; $('#ce_ocurrencias').value = 1;
+}
 
 /* ==========================================================================
  * SPRINTS
